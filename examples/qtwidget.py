@@ -3,8 +3,9 @@ import pathlib
 from pyglet import gl
 import trimesh 
 from trimesh.viewer.windowed import SceneViewerWidget
-from PyQt5 import QtCore, QtOpenGL, Qt
+from PySide2 import QtCore, QtOpenGL, QtWidgets
 here = pathlib.Path(__file__).resolve().parent
+
 
 class ObjectSpace(object):
     """ Object space mocker """
@@ -13,6 +14,7 @@ class ObjectSpace(object):
         # object space is active.
         self._doomed_textures = []
         self._doomed_buffers = []
+
 
 class Context(object):
     """
@@ -63,6 +65,7 @@ class Context(object):
     def delete_buffer(self, buffer_id):
         pass
 
+
 class QtViewerWidget(QtOpenGL.QGLWidget):
     """
     A simple widget for trimesh viewer.
@@ -108,7 +111,7 @@ class QtViewerWidget(QtOpenGL.QGLWidget):
         self.w, self.h = 400, 300
         self.setMinimumSize(self.w, self.h)
         # self.setBaseSize(self.w, self.h)
-        self.setSizePolicy(Qt.QSizePolicy.Expanding, Qt.QSizePolicy.Expanding)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         m = trimesh.load(self.model_path, process=False)
         scene = trimesh.Scene()
         scene.add_geometry(m)
@@ -141,13 +144,15 @@ class QtViewerWidget(QtOpenGL.QGLWidget):
     def paintGL(self):
         self.viewer.on_draw()
 
+
 def main():
-    app = Qt.QApplication(sys.argv)
-    window = Qt.QMainWindow()
+    app = QtWidgets.QApplication(sys.argv)
+    window = QtWidgets.QMainWindow()
     widget = QtViewerWidget(str(here / '../models/fuze.obj'))
     window.setCentralWidget(widget)
     window.show()
     app.exec_()
+
 
 if __name__ == "__main__":
     main()
