@@ -25,9 +25,11 @@ except BaseException as E:
 
 
 try:
-    from .widget import SceneWidget
+    from .widget import (SceneWidget,
+                         QtViewerWidget)
 except BaseException as E:
     SceneWidget = exceptions.closure(E)
+    QtViewerWidget = exceptions.closure(E)
 
 
 # this is only standard library imports
@@ -36,6 +38,7 @@ except BaseException as E:
 # as otherwise flake8 gets mad
 __all__ = ['SceneWidget',
            'SceneViewer',
+           'QtViewerWidget',
            'render_scene',
            'in_notebook',
            'scene_to_notebook',
