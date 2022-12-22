@@ -374,16 +374,16 @@ class Trimesh(Geometry3D):
             values, order='C', dtype=np.float64)
         # face normals need to correspond to faces
         if len(values) == 0 or values.shape != self.faces.shape:
-            log.warning('face_normals incorrect shape, ignoring!')
+            log.debug('face_normals incorrect shape, ignoring!')
             return
         # check if any values are larger than tol.merge
         # don't set the normals if they are all zero
         ptp = values.ptp()
         if not np.isfinite(ptp):
-            log.warning('face_normals contain NaN, ignoring!')
+            log.debug('face_normals contain NaN, ignoring!')
             return
         if ptp < tol.merge:
-            log.warning('face_normals all zero, ignoring!')
+            log.debug('face_normals all zero, ignoring!')
             return
 
         # make sure the first few normals match the first few triangles
@@ -469,8 +469,7 @@ class Trimesh(Geometry3D):
             if values.shape == self.vertices.shape:
                 # check to see if they assigned all zeros
                 if values.ptp() < tol.merge:
-                    log.warning(
-                        'vertex_normals are all set to zero!')
+                    log.debug('vertex_normals are all zero!')
                 self._cache['vertex_normals'] = values
 
     @caching.cache_decorator
@@ -1506,7 +1505,8 @@ class Trimesh(Geometry3D):
         [1, 2, 3, 4]
         """
         return graph.neighbors(
-            edges=self.edges_unique, max_index=len(self.vertices))
+            edges=self.edges_unique,
+            max_index=len(self.vertices))
 
     @caching.cache_decorator
     def is_winding_consistent(self):
@@ -1996,6 +1996,33 @@ class Trimesh(Geometry3D):
         if return_index:
             return result, final_index
 
+        return result
+
+    def subdivide_loop(self, iterations=None):
+        """
+        Subdivide a mesh by dividing each triangle into four
+        triangles and approximating their smoothed surface
+        using loop subdivision. Loop subdivision often looks
+        better on triangular meshes than catmul-clark, which
+        operates primarily on quads.
+
+        Parameters
+        ------------
+        iterations : int
+          Number of iterations to run subdivision.
+        multibody : bool
+          If True will try to subdivide for each submesh
+        """
+        # perform subdivision for one mesh
+        new_vertices, new_faces = remesh.subdivide_loop(
+            vertices=self.vertices,
+            faces=self.faces,
+            iterations=iterations)
+        # create new mesh
+        result = Trimesh(
+            vertices=new_vertices,
+            faces=new_faces,
+            process=False)
         return result
 
     @log_time
@@ -2857,10 +2884,7 @@ class Trimesh(Geometry3D):
         contains : (n, ) bool
           Whether or not each point is inside the mesh
         """
-        if not self.is_watertight:
-            log.warning('Mesh is non-watertight for contained point query!')
-        contains = self.ray.contains_points(points)
-        return contains
+        return self.ray.contains_points(points)
 
     @caching.cache_decorator
     def face_angles(self):

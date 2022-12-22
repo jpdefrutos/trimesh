@@ -8,13 +8,17 @@ from setuptools import setup
 _version_file = os.path.join(
     os.path.dirname(__file__),
     'trimesh', 'version.py')
-with open(_version_file, 'r') as f:
-    _version_raw = f.read()
-# use eval to get a clean string of version from file
-__version__ = eval(next(
-    line.strip().split('=')[-1]
-    for line in str.splitlines(_version_raw)
-    if '_version_' in line))
+
+if os.path.isfile(_version_file):
+    with open(_version_file, 'r') as f:
+        _version_raw = f.read()
+    # use eval to get a clean string of version from file
+    __version__ = eval(next(
+        line.strip().split('=')[-1]
+        for line in str.splitlines(_version_raw)
+        if '_version_' in line))
+else:
+    __version__ = None
 
 # load README.md as long_description
 long_description = ''
@@ -32,7 +36,7 @@ requirements_easy = set([
     'scipy',     # provide convex hulls, fast graph ops, etc
     'networkx',  # provide slow graph ops with a nice API
     'lxml',      # handle XML better and faster than built- in XML
-    'pyglet',    # render preview windows nicely
+    'pyglet<2',  # render preview windows nicely : note pyglet 2.0 is basically a re-write
     'shapely',   # handle 2D polygons robustly
     'rtree',     # create N-dimension trees for broad-phase queries
     'svg.path',  # handle SVG format path strings
@@ -76,6 +80,7 @@ lock = [((3, 4), 'lxml', '4.3.5'),
         ((3, 4), 'shapely', '1.6.4'),
         ((3, 4), 'pyglet', '1.4.10'),
         ((3, 5), 'sympy', None),
+        ((3, 0), 'pyglet<2', None),
         ((3, 6), 'svg.path', '4.1')]
 for max_python, name, version in lock:
     if current <= max_python:
@@ -130,6 +135,10 @@ if '--list-all' in sys.argv:
 elif '--list-easy' in sys.argv:
     # again will not include numpy+setuptools
     print('\n'.join(requirements_easy))
+    exit()
+elif '--list-test' in sys.argv:
+    # again will not include numpy+setuptools
+    print('\n'.join(requirements_test))
     exit()
 elif '--format' in sys.argv:
     format_all()

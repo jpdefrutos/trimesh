@@ -39,8 +39,11 @@ _ns_name = 'trimesh'
 _ns_url = 'https://github.com/mikedh/trimesh'
 _ns = '{{{}}}'.format(_ns_url)
 
+_IDENTITY = np.eye(3)
+_IDENTITY.flags['WRITEABLE'] = False
 
-def svg_to_path(file_obj, file_type=None):
+
+def svg_to_path(file_obj=None, file_type=None, path_string=None):
     """
     Load an SVG file into a Path2D object.
 
@@ -50,6 +53,8 @@ def svg_to_path(file_obj, file_type=None):
       Contains SVG data
     file_type: None
       Not used
+    path_string : None or str
+      If passed, parse a single path string and ignore `file_obj`.
 
     Returns
     -----------
@@ -78,27 +83,35 @@ def svg_to_path(file_obj, file_type=None):
             if current is None:
                 break
         if len(matrices) == 0:
-            return np.eye(3)
+            return _IDENTITY
         elif len(matrices) == 1:
             return matrices[0]
         else:
             return util.multi_dot(matrices[::-1])
 
-    # first parse the XML
-    tree = etree.fromstring(file_obj.read())
-    # store paths and transforms as
-    # (path string, 3x3 matrix)
-    paths = []
-    for element in tree.iter('{*}path'):
-        # store every path element attributes and transform
-        paths.append((element.attrib,
-                      element_transform(element)))
+    force = None
+    if file_obj is not None:
+        # first parse the XML
+        tree = etree.fromstring(file_obj.read())
+        # store paths and transforms as
+        # (path string, 3x3 matrix)
+        paths = []
+        for element in tree.iter('{*}path'):
+            # store every path element attributes and transform
+            paths.append((element.attrib,
+                          element_transform(element)))
 
-    try:
-        # see if the SVG should be reproduced as a scene
-        force = tree.attrib[_ns + 'class']
-    except BaseException:
-        force = None
+        try:
+            # see if the SVG should be reproduced as a scene
+            force = tree.attrib[_ns + 'class']
+        except BaseException:
+            pass
+
+    elif path_string is not None:
+        # parse a single SVG path string
+        paths = [({'d': path_string}, np.eye(3))]
+    else:
+        raise ValueError('`file_obj` or `pathstring` required')
 
     result = _svg_path_convert(paths=paths, force=force)
     try:
@@ -171,7 +184,7 @@ def transform_to_matrices(transform):
                            args.replace(',', ' ').split()])
         if key == 'translate':
             # convert translation to a (3, 3) homogeneous matrix
-            matrices.append(np.eye(3))
+            matrices.append(_IDENTITY.copy())
             matrices[-1][:2, 2] = values
         elif key == 'matrix':
             # [a b c d e f] ->
@@ -192,7 +205,7 @@ def transform_to_matrices(transform):
                                           point=point))
         elif key == 'scale':
             # supports (x_scale, y_scale) or (scale)
-            mat = np.eye(3)
+            mat = _IDENTITY.copy()
             mat[:2, :2] *= values
             matrices.append(mat)
         else:
@@ -221,15 +234,24 @@ def _svg_path_convert(paths, force=None):
 
     def load_multi(multi):
         # load a previously parsed multiline
-        return (Line(points=np.arange(len(multi.points)) + counts[name]),
-                multi.points)
+        # start the count where indicated
+        start = counts[name]
+        # end at the block of our new points
+        end = start + len(multi.points)
+
+        return (Line(points=np.arange(start, end)), multi.points)
 
     def load_arc(svg_arc):
         # load an SVG arc into a trimesh arc
         points = complex_to_float([svg_arc.start,
                                    svg_arc.point(0.5),
                                    svg_arc.end])
-        return Arc(points=np.arange(3) + counts[name]), points
+        # create an arc from the now numpy points
+        arc = Arc(points=np.arange(3) + counts[name],
+                  # we may have monkey-patched the entity to
+                  # indicate that it is a closed circle
+                  closed=getattr(svg_arc, 'closed', False))
+        return arc, points
 
     def load_quadratic(svg_quadratic):
         # load a quadratic bezier spline
@@ -284,31 +306,69 @@ def _svg_path_convert(paths, force=None):
         name = _decode(attrib.get(_ns + 'name'))
         # get parsed entities from svg.path
         raw = np.array(list(parse_path(path_string)))
+
         # if there is no path string exit
         if len(raw) == 0:
             continue
-        # check to see if each entity is "line-like"
-        is_line = np.array([type(i).__name__ in
-                            ('Line', 'Close')
-                            for i in raw])
-        # find groups of consecutive lines so we can combine them
+
+        # create an integer code for entities we can combine
+        kinds_lookup = {'Line': 1, 'Close': 1, 'Arc': 2}
+        # get a code for each entity we parsed
+        kinds = np.array([kinds_lookup.get(type(i).__name__, 0)
+                          for i in raw], dtype=int)
+
+        # find groups of consecutive entities so we can combine
         blocks = grouping.blocks(
-            is_line, min_len=1, only_nonzero=False)
+            kinds, min_len=1, only_nonzero=False)
 
         if tol.strict:
             # in unit tests make sure we didn't lose any entities
             assert util.allclose(np.hstack(blocks),
                                  np.arange(len(raw)))
 
-        # Combine consecutive lines into a single MultiLine
+        # Combine consecutive entities that can be represented
+        # more concisely as a single trimesh entity.
         parsed = []
         for b in blocks:
-            if type(raw[b[0]]).__name__ in ('Line', 'Close'):
+            chunk = raw[b]
+            current = type(raw[b[0]]).__name__
+            if current in ('Line', 'Close'):
                 # if entity consists of lines add a multiline
-                parsed.append(MultiLine(raw[b]))
+                parsed.append(MultiLine(chunk))
+            elif len(b) > 1 and current == 'Arc':
+                # if we have multiple arcs check to see if they
+                # actually represent a single closed circle
+                # get a single array with the relevant arc points
+                verts = np.array([[a.start.real,
+                                   a.start.imag,
+                                   a.end.real,
+                                   a.end.imag,
+                                   a.center.real,
+                                   a.center.imag,
+                                   a.radius.real,
+                                   a.radius.imag,
+                                   a.rotation] for a in chunk],
+                                 dtype=np.float64)
+                # all arcs share the same center radius and rotation
+                closed = False
+                if verts[:, 4:].ptp(axis=0).mean() < 1e-3:
+                    start, end = verts[:, :2], verts[:, 2:4]
+                    # if every end point matches the start point of a new
+                    # arc that means this is really a closed circle made
+                    # up of multiple arc segments
+                    closed = util.allclose(start, np.roll(end, 1, axis=0))
+                if closed:
+                    # hot-patch a closed arc flag
+                    chunk[0].closed = True
+                    # all arcs in this block are now represented by one entity
+                    parsed.append(chunk[0])
+                else:
+                    # we don't have a closed circle so add each
+                    # arc entity individually without combining
+                    parsed.extend(chunk)
             else:
                 # otherwise just add the entities
-                parsed.extend(raw[b])
+                parsed.extend(chunk)
         try:
             # try to retrieve any trimesh attributes as metadata
             entity_meta = {
@@ -332,13 +392,16 @@ def _svg_path_convert(paths, force=None):
                 vertices[name].append(transform_points(v, matrix))
                 counts[name] += len(v)
 
+    if len(vertices) == 0:
+        return {'vertices': [], 'entities': []}
+
     geoms = {name: {'vertices': np.vstack(v),
                     'entities': entities[name]}
              for name, v in vertices.items()}
     if len(geoms) > 1 or force == 'Scene':
         kwargs = {'geometry': geoms}
     else:
-        # return a Path2D
+        # return a single Path2D
         kwargs = next(iter(geoms.values()))
 
     return kwargs
