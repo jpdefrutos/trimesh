@@ -3,7 +3,6 @@ import numpy as np
 from shapely import ops
 from shapely.geometry import Polygon
 
-from .. import util
 from .. import bounds
 from .. import graph
 from .. import geometry
@@ -128,13 +127,20 @@ def edges_to_polygons(edges, vertices):
       Polygon objects with interiors
     """
 
+    assert isinstance(vertices, np.ndarray)
+
     # create closed polygon objects
     polygons = []
     # loop through a sequence of ordered traversals
     for dfs in graph.traversals(edges, mode='dfs'):
         try:
             # try to recover polygons before they are more complicated
-            polygons.append(repair_invalid(Polygon(vertices[dfs])))
+            repaired = repair_invalid(Polygon(vertices[dfs]))
+            # if it returned a multipolygon extend into a flat list
+            if hasattr(repaired, 'geoms'):
+                polygons.extend(repaired.geoms)
+            else:
+                polygons.append(repaired)
         except ValueError:
             continue
 
@@ -214,7 +220,7 @@ def transform_polygon(polygon, matrix):
     """
     matrix = np.asanyarray(matrix, dtype=np.float64)
 
-    if util.is_sequence(polygon):
+    if hasattr(polygon, 'geoms'):
         result = [transform_polygon(p, t)
                   for p, t in zip(polygon, matrix)]
         return result
@@ -230,7 +236,7 @@ def transform_polygon(polygon, matrix):
     return result
 
 
-def plot(polygon, show=True, **kwargs):
+def plot(polygon, show=True, axes=None, **kwargs):
     """
     Plot a shapely polygon using matplotlib.
 
@@ -246,18 +252,25 @@ def plot(polygon, show=True, **kwargs):
     import matplotlib.pyplot as plt
 
     def plot_single(single):
-        plt.plot(*single.exterior.xy, **kwargs)
+        axes.plot(*single.exterior.xy, **kwargs)
         for interior in single.interiors:
-            plt.plot(*interior.xy, **kwargs)
+            axes.plot(*interior.xy, **kwargs)
     # make aspect ratio non-stupid
-    plt.axes().set_aspect('equal', 'datalim')
-    if util.is_sequence(polygon):
+    if axes is None:
+        axes = plt.axes()
+    axes.set_aspect('equal', 'datalim')
+
+    if polygon.__class__.__name__ == 'MultiPolygon':
+        [plot_single(i) for i in polygon.geoms]
+    elif hasattr(polygon, '__iter__'):
         [plot_single(i) for i in polygon]
     else:
         plot_single(polygon)
 
     if show:
         plt.show()
+
+    return axes
 
 
 def resample_boundaries(polygon, resolution, clip=None):
@@ -455,8 +468,8 @@ def random_polygon(segments=8, radius=1.0):
         (np.cos(angles), np.sin(angles))) * radii.reshape((-1, 1))
     points = np.vstack((points, points[0]))
     polygon = Polygon(points).buffer(0.0)
-    if util.is_sequence(polygon):
-        return polygon[0]
+    if hasattr(polygon, 'geoms'):
+        return polygon.geoms[0]
     return polygon
 
 
@@ -610,7 +623,7 @@ def repair_invalid(polygon, scale=None, rtol=.5):
     # this will fix a subset of problems.
     basic = polygon.buffer(tol.zero)
     # if it returned multiple polygons check the largest
-    if util.is_sequence(basic):
+    if hasattr(basic, 'geoms'):
         basic = basic.geoms[np.argmax([i.area for i in basic.geoms])]
 
     # check perimeter of result against original perimeter
@@ -620,7 +633,8 @@ def repair_invalid(polygon, scale=None, rtol=.5):
         return basic
 
     if scale is None:
-        distance = 0.002 * polygon_scale(polygon)
+        distance = 0.002 * np.reshape(
+            polygon.bounds, (2, 2)).ptp(axis=0).mean()
     else:
         distance = 0.002 * scale
 
@@ -640,7 +654,7 @@ def repair_invalid(polygon, scale=None, rtol=.5):
                 return recon
 
         # try de-deuplicating the outside ring
-        points = np.array(polygon.exterior)
+        points = np.array(polygon.exterior.coords)
         # remove any segments shorter than tol.merge
         # this is a little risky as if it was discretized more
         # finely than 1-e8 it may remove detail
@@ -657,8 +671,10 @@ def repair_invalid(polygon, scale=None, rtol=.5):
     # buffer and unbuffer the whole polygon
     buffered = polygon.buffer(distance).buffer(-distance)
     # if it returned multiple polygons check the largest
-    if util.is_sequence(buffered):
-        buffered = buffered.geoms[np.argmax([i.area for i in buffered.geoms])]
+    if hasattr(buffered, 'geoms'):
+        areas = np.array([b.area for b in buffered.geoms])
+        return buffered.geoms[areas.argmax()]
+
     # check perimeter of result against original perimeter
     if buffered.is_valid and np.isclose(buffered.length,
                                         polygon.length,
@@ -828,3 +844,41 @@ def projected(mesh,
             [p.buffer(padding)
              for p in polygons]).buffer(-padding)
     return polygon
+
+
+def second_moment(coords):
+    """
+    Calculate the second moment of area of a polygon
+    from the boundary.
+
+    Parameters
+    ------------
+    coords : (n, 2) float or Polygon
+      Closed polygon.
+
+    Returns
+    ----------
+    moments : (3,) float
+      The values of `[Ix, Iy, Ixy]`
+    """
+    if hasattr(coords, 'exterior'):
+        # if we have been passed a shapely.geometry.Polygon
+        exterior = second_moment(np.array(coords.exterior.coords))
+        interiors = np.sum([second_moment(np.array(i.coords))
+                            for i in coords.interiors],
+                           axis=0)
+        return exterior - interiors
+
+    coords = np.asanyarray(coords, dtype=np.float64)
+    # shorthand the coordinates
+    x1, y1 = np.vstack((coords[-1], coords[:-1])).T
+    x2, y2 = coords.T
+    # do vectorized operations
+    v = x1 * y2 - x2 * y1
+    Ix = v * (y1 * y1 + y1 * y2 + y2 * y2)
+    Iy = v * (x1 * x1 + x1 * x2 + x2 * x2)
+    Ixy = v * (x1 * y2 + 2 * x1 * y1 + 2 * x2 * y2 + x2 * y1)
+    # divide by constants and return
+    return np.array([Ix.sum() / 12.0,
+                     Iy.sum() / 12.0,
+                     Ixy.sum() / 24.0], dtype=np.float64)

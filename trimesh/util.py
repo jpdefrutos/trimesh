@@ -33,12 +33,14 @@ else:
 
 # a flag we can check elsewhere for Python 3
 PY3 = sys.version_info.major >= 3
+
 if PY3:
     # for type checking
     basestring = str
     # Python 3
     from io import BytesIO, StringIO
     from shutil import which  # noqa
+    from time import perf_counter as now  # noqa
 else:
     # Python 2
     from StringIO import StringIO
@@ -47,6 +49,7 @@ else:
     StringIO.__enter__ = lambda a: a
     StringIO.__exit__ = lambda a, b, c, d: a.close()
     BytesIO = StringIO
+    from time import time as now  # noqa
 
 
 try:
@@ -1485,12 +1488,11 @@ def concatenate(a, b=None):
             'failed to combine visuals', exc_info=True)
         visual = None
     # create the mesh object
-    mesh = trimesh_type(vertices=vertices,
+    return trimesh_type(vertices=vertices,
                         faces=faces,
                         face_normals=face_normals,
                         visual=visual,
                         process=False)
-    return mesh
 
 
 def submesh(mesh,
@@ -1887,27 +1889,19 @@ def decompress(file_obj, file_type):
       Data from archive in format {file name : file-like}
     """
 
-    def is_zip():
-        archive = zipfile.ZipFile(file_obj)
-        result = {name: wrap_as_stream(archive.read(name))
-                  for name in archive.namelist()}
-        return result
-
-    def is_tar():
-        import tarfile
-        archive = tarfile.open(fileobj=file_obj, mode='r')
-        result = {name: archive.extractfile(name)
-                  for name in archive.getnames()}
-        return result
-
     file_type = str(file_type).lower()
     if isinstance(file_obj, bytes):
         file_obj = wrap_as_stream(file_obj)
 
-    if file_type[-3:] == 'zip':
-        return is_zip()
+    if file_type.endswith('zip'):
+        archive = zipfile.ZipFile(file_obj)
+        return {name: wrap_as_stream(archive.read(name))
+                for name in archive.namelist()}
     if 'tar' in file_type[-6:]:
-        return is_tar()
+        import tarfile
+        archive = tarfile.open(fileobj=file_obj, mode='r')
+        return {name: archive.extractfile(name)
+                for name in archive.getnames()}
     raise ValueError('Unsupported type passed!')
 
 
@@ -2310,7 +2304,6 @@ def decode_text(text, initial='utf-8'):
     # if not bytes just return input
     if not hasattr(text, 'decode'):
         return text
-
     try:
         # initially guess file is UTF-8 or specified encoding
         text = text.decode(initial)
@@ -2318,7 +2311,9 @@ def decode_text(text, initial='utf-8'):
         # detect different file encodings
         import chardet
         # try to detect the encoding of the file
-        detect = chardet.detect(text)
+        # only look at the first 1000 characters otherwise
+        # for big files chardet looks at everything and is slow
+        detect = chardet.detect(text[:1000])
         # warn on files that aren't UTF-8
         log.debug(
             'Data not {}! Trying {} (confidence {})'.format(
@@ -2326,7 +2321,7 @@ def decode_text(text, initial='utf-8'):
                 detect['encoding'],
                 detect['confidence']))
         # try to decode again, unwrap in try
-        text = text.decode(detect['encoding'])
+        text = text.decode(detect['encoding'], errors='ignore')
     return text
 
 
@@ -2404,25 +2399,29 @@ def unique_name(start, contains):
       A name that is not contained in `contains`
     """
     # exit early if name is not in bundle
-    if len(contains) == 0 or (len(start) > 0 and start not in contains):
+    if (start is not None and
+        len(start) > 0 and
+            start not in contains):
         return start
 
     # start checking with zero index
     increment = 0
-    formatter = start + '_{}'
-
-    if len(start) > 0:
+    if start is not None and len(start) > 0:
+        formatter = start + '_{}'
         # split by our delimiter once
         split = start.rsplit('_', 1)
         if len(split) == 2:
             try:
-                # start incrementing from the existing trailing value
+                # start incrementing from the existing
+                # trailing value
                 # if it is not an integer this will fail
                 increment = int(split[1])
                 # include the first split value
                 formatter = split[0] + '_{}'
             except BaseException:
                 pass
+    else:
+        formatter = 'geometry_{}'
 
     # if contains is empty we will only need to check once
     for i in range(increment + 1, 2 + increment + len(contains)):
