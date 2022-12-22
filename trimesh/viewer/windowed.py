@@ -234,7 +234,7 @@ class SceneViewer(pyglet.window.Window):
 
     def _update_meshes(self):
         # call the callback if specified
-        if self.callback is not None:
+        if self.callback is not None and self.view['callback']:
             self.callback(self.scene)
             self._update_vertex_list()
             self._update_perspective(self.width, self.height)
@@ -341,7 +341,8 @@ class SceneViewer(pyglet.window.Window):
                 pose=self._initial_camera_transform,
                 size=self.scene.camera.resolution,
                 scale=self.scene.scale,
-                target=self.scene.centroid)}
+                target=self.scene.centroid),
+            'callback': True}
         try:
             # if any flags are passed override defaults
             if isinstance(flags, dict):
@@ -519,6 +520,13 @@ class SceneViewer(pyglet.window.Window):
         # perform gl actions
         self.update_flags()
 
+    def toggle_callback(self):
+        """
+        Toogle callback execution
+        """
+        self.view['callback'] = not self.view['callback']
+        self.update_flags()
+
     def update_flags(self):
         """
         Check the view flags, and call required GL functions.
@@ -616,7 +624,7 @@ class SceneViewer(pyglet.window.Window):
         width, height = self._update_perspective(width, height)
         self.scene.camera.resolution = (width, height)
         self.view['ball'].resize(self.scene.camera.resolution)
-        self.scene.camera_transform = self.view['ball'].pose
+        self.scene.camera_transform(self.view['ball'].pose)
 
     def on_mouse_press(self, x, y, buttons, modifiers):
         """
@@ -638,21 +646,21 @@ class SceneViewer(pyglet.window.Window):
             self.view['ball'].set_state(Trackball.STATE_ZOOM)
 
         self.view['ball'].down(np.array([x, y]))
-        self.scene.camera_transform = self.view['ball'].pose
+        self.scene.camera_transform(self.view['ball'].pose)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         """
         Pan or rotate the view.
         """
         self.view['ball'].drag(np.array([x, y]))
-        self.scene.camera_transform = self.view['ball'].pose
+        self.scene.camera_transform(self.view['ball'].pose)
 
     def on_mouse_scroll(self, x, y, dx, dy):
         """
         Zoom the view.
         """
         self.view['ball'].scroll(dy)
-        self.scene.camera_transform = self.view['ball'].pose
+        self.scene.camera_transform(self.view['ball'].pose)
 
     def on_key_press(self, symbol, modifiers):
         """
@@ -675,6 +683,8 @@ class SceneViewer(pyglet.window.Window):
             self.maximize()
         elif symbol == pyglet.window.key.F:
             self.toggle_fullscreen()
+        elif symbol == pyglet.window.key.SPACE:
+            self.toggle_callback()
 
         if symbol in [
                 pyglet.window.key.LEFT,
@@ -690,7 +700,7 @@ class SceneViewer(pyglet.window.Window):
                 self.view['ball'].drag([0, -magnitude])
             elif symbol == pyglet.window.key.UP:
                 self.view['ball'].drag([0, magnitude])
-            self.scene.camera_transform = self.view['ball'].pose
+            self.scene.camera_transform(self.view['ball'].pose)
 
     def on_draw(self):
         """
@@ -975,6 +985,8 @@ class SceneViewerWidget(pyglet.gui.WidgetBase):
         # call after geometry is added
         self.init_gl()
         # self.set_size(*resolution)
+        if flags is not None:
+            self.reset_view(flags=flags)
         self.update_flags()
 
         # someone has passed a callback to be called periodically
@@ -1005,7 +1017,7 @@ class SceneViewerWidget(pyglet.gui.WidgetBase):
 
     def _update_meshes(self):
         # call the callback if specified
-        if self.callback is not None:
+        if self.callback is not None and self.view['callback']:
             self.callback(self.scene)
             self._update_vertex_list()
             self._update_perspective(self.width, self.height)
@@ -1115,8 +1127,9 @@ class SceneViewerWidget(pyglet.gui.WidgetBase):
                 pose=self._initial_camera_transform,
                 size=self.scene.camera.resolution,
                 scale=self.scene.scale,
-                target=self.scene.centroid)}
-        self.scene.camera_transform[...] = self.view['ball'].pose
+                target=self.scene.centroid),
+            'callback': True}
+        self.scene.camera_transform(self.view['ball'].pose)
         try:
             # if any flags are passed override defaults
             if isinstance(flags, dict):
@@ -1288,6 +1301,13 @@ class SceneViewerWidget(pyglet.gui.WidgetBase):
         # perform gl actions
         self.update_flags()
 
+    def toggle_callback(self):
+        """
+        Toogle callback execution
+        """
+        self.view['callback'] = not self.view['callback']
+        self.update_flags()
+
     def update_flags(self):
         """
         Check the view flags, and call required GL functions.
@@ -1385,7 +1405,7 @@ class SceneViewerWidget(pyglet.gui.WidgetBase):
         width, height = self._update_perspective(width, height)
         self.scene.camera.resolution = (width, height)
         self.view['ball'].resize(self.scene.camera.resolution)
-        self.scene.camera_transform[...] = self.view['ball'].pose
+        self.scene.camera_transform(self.view['ball'].pose)
 
     def on_mouse_press(self, x, y, buttons, modifiers):
         """
@@ -1408,21 +1428,21 @@ class SceneViewerWidget(pyglet.gui.WidgetBase):
             self.view['ball'].set_state(Trackball.STATE_ZOOM)
 
         self.view['ball'].down(np.array([x, -y]))
-        self.scene.camera_transform[...] = self.view['ball'].pose
+        self.scene.camera_transform(self.view['ball'].pose)
 
     def on_mouse_drag(self, x, y):
         """
         Pan or rotate the view.
         """
         self.view['ball'].drag(np.array([x, -y]))
-        self.scene.camera_transform[...] = self.view['ball'].pose
+        self.scene.camera_transform(self.view['ball'].pose)
 
     def on_mouse_scroll(self, dx, dy):
         """
         Zoom the view.
         """
         self.view['ball'].scroll(dy)
-        self.scene.camera_transform[...] = self.view['ball'].pose
+        self.scene.camera_transform(self.view['ball'].pose)
 
     def on_key_press(self, symbol, modifiers):
         """
@@ -1439,6 +1459,9 @@ class SceneViewerWidget(pyglet.gui.WidgetBase):
             self.toggle_axis()
         elif symbol == pyglet.window.key.G:
             self.toggle_grid()
+        elif symbol == pyglet.window.key.SPACE:
+            self.toggle_callback()
+
         if symbol in [
                 pyglet.window.key.LEFT,
                 pyglet.window.key.RIGHT,
@@ -1453,7 +1476,7 @@ class SceneViewerWidget(pyglet.gui.WidgetBase):
                 self.view['ball'].drag([0, -magnitude])
             elif symbol == pyglet.window.key.UP:
                 self.view['ball'].drag([0, magnitude])
-            self.scene.camera_transform[...] = self.view['ball'].pose
+            self.scene.camera_transform(self.view['ball'].pose)
 
     def on_draw(self):
         """

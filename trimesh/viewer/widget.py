@@ -377,6 +377,7 @@ class QtViewerWidget(QtOpenGL.QGLWidget):
         self.scene = scene
         self.viewer_opts = viewer_opts
         self.w, self.h = widget_size
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
     def initializeGL(self):
         """
@@ -416,6 +417,9 @@ class QtViewerWidget(QtOpenGL.QGLWidget):
 
     def wheelEvent(self, event) -> None:
         self.viewer.on_mouse_scroll(0, event.angleDelta().y() / 120)
+
+    def keyPressEvent(self, event) -> None:
+        self.viewer.on_key_press(event.key(), None)
 
     def resizeGL(self, w, h):
         self.viewer.on_resize(w, h)
